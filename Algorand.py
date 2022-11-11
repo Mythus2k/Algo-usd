@@ -2,34 +2,28 @@ import yfinance as yf
 from matplotlib import pyplot as plt
 from pandas import DataFrame,Timestamp
 
-def download(timeframe):
+def download(period='5d'):
     """
     timeframe : int
         in minutes, history included in point column
     """
-    algo = yf.download('algo-usd',period='5d',interval='1m')
+    algo = yf.download('algo-usd',period=period,interval='1m')
     algo.pop('Volume')
     algo.pop('Adj Close')
     algo = algo.reset_index()
 
-    algo = adj_tz(algo)
-    algo = percent_col(algo)
-    algo = point_col(algo,timeframe)
-    algo = moving_avg(algo,120)
-    algo = moving_avg(algo,20)
-
     return algo
     
-def percent_col(df):
+def percent_col(df,col):
     percent = [0]
     for i,row in df.iterrows():
         if i > 0:
-            new = row['Close']
-            old = df.iloc[i-1]['Close']
-            percent += [100*(new-old)/old]
-
-    df['percent'] = percent
-    return df
+            new = row[col]
+            old = df.iloc[i-1][col]
+            if old != 0: percent += [100*(new-old)/old]
+            else: percent += [0]
+    df[f'delta {col}'] = percent
+    return df, f'delta {col}'
 
 def point_col(df,timeframe=60):
     points = [0 for _ in range(timeframe)]
@@ -50,7 +44,7 @@ def moving_avg(df,history=120):
         avg += [df[i-history:i]['Close'].mean()]
 
     df[f'{history} avg'] = avg
-    return df
+    return df, f'{history} avg'
 
 def adj_tz(df,tz='US/Eastern'):
     for i,row in df.iterrows():
@@ -66,30 +60,20 @@ def plot_price(df,period=[240,0]):
     plt.plot(x,df['20 avg'])
     plt.show()
 
-def moving_ind(df):
-    ind = ['na','na']
-    holding = False
-    for i,row in df[2:].iterrows():
-        if not holding:
-            below = df.iloc[i-2]['20 avg'] < df.iloc[i-2]['120 avg']
-            cross = df.iloc[i-1]['20 avg'] > df.iloc[i-1]['120 avg']
-            stick = row['20 avg'] > row['120 avg']
+def diff_col(df,long,short):
+    l = algo.loc[algo[long] > 0]
+    diff = [0 for _ in range(len(df)-len(l))]
+    for i, row in l.iterrows():
+        diff += [df[i][short]-df[i][long]]
 
-            if below and cross and stick:
-                ind += ['buy']
-                holding = True
-                enter = row['Close']
-            else:
-                ind += ['na']
-        elif holding:
-            slow = df.iloc[i-2]['20 avg'] < df.iloc[i-1]['20 avg']
-            peak = df.iloc[i-1]['20 avg'] > row['20 avg']
-            
-
-    df['crossing ind'] = ind
-    return df
+    df[f'{long:3} vs {short:3}'] = diff
+    return df, f'{long:3} vs {short:3}'
 
 if __name__ == '__main__':
-    algo = download(60)
+    algo = download('5d')
+    algo,long = moving_avg(algo,120)
+    algo,short = moving_avg(algo,30)
 
-    print(moving_ind(algo)[-60:])
+    algo,diff = diff_col(algo,long,short)
+
+    print(algo)
