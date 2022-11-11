@@ -69,7 +69,12 @@ def diff_col(df,long,short):
     df['gap'] = diff
     return df, 'gap'
 
-
+def delta_col(df,col):
+    delta = [0]
+    c = df[col]
+    delta += [c[i] - c[i-1] for i in range(1,len(c))]
+    df[f'delta {col}'] = delta
+    return df,f'delta {col}'
 
 if __name__ == '__main__':
     algo = download('5d')
@@ -77,17 +82,20 @@ if __name__ == '__main__':
     algo,short = moving_avg(algo,20)
 
     algo,diff = diff_col(algo,long,short)
+    algo,delta = delta_col(algo,diff)
 
     algo = algo[-60*8:]
     ot = algo.loc[algo[long] > 0]
     t = algo.loc[algo[short] > 0]
 
-    plt.subplot(1,2,1)
+    plt.subplot(1,3,1)
     plt.plot(algo.index,algo['Close'])
     plt.plot(ot.index,ot[long],color='orange')
     plt.plot(t.index,t[short],color='green')
 
-    plt.subplot(1,2,2)
+    plt.subplot(1,3,2)
     plt.plot(algo.index,algo['gap'])
 
+    plt.subplot(1,3,3)
+    plt.plot(algo.index,algo[delta])
     plt.show()
