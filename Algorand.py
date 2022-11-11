@@ -61,13 +61,13 @@ def plot_price(df,period=[240,0]):
     plt.show()
 
 def diff_col(df,long,short):
-    l = algo.loc[algo[long] > 0]
-    diff = [0 for _ in range(len(df)-len(l))]
-    for i, row in l.iterrows():
-        diff += [df[i][short]-df[i][long]]
+    l = df[long]
+    s = df[short]
 
-    df[f'{long:3} vs {short:3}'] = diff
-    return df, f'{long:3} vs {short:3}'
+    diff = [s[i] - l[i] for i in range(len(l))]
+
+    df['gap'] = diff
+    return df, 'gap'
 
 if __name__ == '__main__':
     algo = download('5d')
@@ -76,4 +76,16 @@ if __name__ == '__main__':
 
     algo,diff = diff_col(algo,long,short)
 
-    print(algo)
+    algo = algo[-60*5:]
+    ot = algo.loc[algo[long] > 0]
+    t = algo.loc[algo[short] > 0]
+
+    plt.subplot(1,2,1)
+    plt.plot(algo.index,algo['Close'])
+    plt.plot(ot.index,ot[long],color='orange')
+    plt.plot(t.index,t[short],color='green')
+
+    plt.subplot(1,2,2)
+    plt.bar(algo.index,algo['gap'])
+
+    plt.show()
