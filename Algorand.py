@@ -60,14 +60,14 @@ def plot_price(df,period=[240,0]):
     plt.plot(x,df['20 avg'])
     plt.show()
 
-def diff_col(df,long,short):
+def gap_col(df,long,short):
     l = df[long]
     s = df[short]
 
     diff = [s[i] - l[i] for i in range(len(l))]
 
-    df['gap'] = diff
-    return df, 'gap'
+    df[f'gap {long} v {short}'] = diff
+    return df, f'gap {long} v {short}'
 
 def delta_col(df,col):
     delta = [0]
@@ -81,7 +81,7 @@ if __name__ == '__main__':
     algo,long = moving_avg(algo,240)
     algo,short = moving_avg(algo,20)
 
-    algo,diff = diff_col(algo,long,short)
+    algo,diff = gap_col(algo,long,short)
     algo,delta = delta_col(algo,diff)
 
     algo = algo[-60*8:]
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     plt.plot(t.index,t[short],color='green')
 
     plt.subplot(1,3,2)
-    plt.plot(algo.index,algo['gap'])
+    plt.plot(algo.index,algo[diff])
 
     plt.subplot(1,3,3)
     plt.plot(algo.index,algo[delta])
