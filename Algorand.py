@@ -69,14 +69,16 @@ def diff_col(df,long,short):
     df['gap'] = diff
     return df, 'gap'
 
+
+
 if __name__ == '__main__':
     algo = download('5d')
-    algo,long = moving_avg(algo,120)
-    algo,short = moving_avg(algo,30)
+    algo,long = moving_avg(algo,240)
+    algo,short = moving_avg(algo,20)
 
     algo,diff = diff_col(algo,long,short)
 
-    algo = algo[-60*5:]
+    algo = algo[-60*8:]
     ot = algo.loc[algo[long] > 0]
     t = algo.loc[algo[short] > 0]
 
@@ -86,6 +88,6 @@ if __name__ == '__main__':
     plt.plot(t.index,t[short],color='green')
 
     plt.subplot(1,2,2)
-    plt.bar(algo.index,algo['gap'])
+    plt.plot(algo.index,algo['gap'])
 
     plt.show()
