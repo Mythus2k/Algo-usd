@@ -3,10 +3,6 @@ from matplotlib import pyplot as plt
 from pandas import DataFrame,Timestamp
 
 def download(period='5d'):
-    """
-    timeframe : int
-        in minutes, history included in point column
-    """
     algo = yf.download('algo-usd',period=period,interval='1m')
     algo.pop('Volume')
     algo.pop('Adj Close')
@@ -51,13 +47,32 @@ def adj_tz(df,tz='US/Eastern'):
         row['Datetime'] = row['Datetime'].tz_convert(tz)
     return df
 
-def plot_price(df,period=[240,0]):
-    df = df[-period[0]:-period[1]]
-    x = df.index
+def plot():
+    algo = download('5d')
+    algo,long = moving_avg(algo,240)
+    algo,short = moving_avg(algo,20)
 
-    plt.plot(x,df['Close'])
-    plt.plot(x,df['120 avg'])
-    plt.plot(x,df['20 avg'])
+    algo,delta = delta_col(algo,short)
+
+    algo = algo[-60*5:]
+    ot = algo.loc[algo[long] > 0]
+    t = algo.loc[algo[short] > 0]
+
+    plt.subplot(1,2,1)
+    plt.plot(algo.index,algo['Close'])
+    plt.plot(ot.index,ot[long],color='orange')
+    plt.plot(t.index,t[short],color='green')
+
+    plt.subplot(1,2,2)
+    x, y = [list() for _ in range(2)]
+    for i,row in algo.iterrows():
+        if i%1 == 0:
+            x += [row.name]
+            y += [row[delta]]
+    plt.plot(x,y)
+
+
+    print(algo)
     plt.show()
 
 def gap_col(df,long,short):
@@ -76,26 +91,62 @@ def delta_col(df,col):
     df[f'delta {col}'] = delta
     return df,f'delta {col}'
 
+def smooth_col(df,col,smooth=2):
+    avg = [0 for _ in range(smooth)]
+    for i,row in df[smooth:].iterrows():
+        avg += [df[col][i-smooth:i].mean()]
+
+    newCol = f'{col} smooth'
+    df[newCol] = avg
+    return df,newCol
+
+def ind_avg(df,col):
+    holding = False
+    ind = ['na']
+    for i,row in df[1:].iterrows():
+        if not holding:
+            below = df[col][i-1] < 0
+            cross = row[col] > 0 
+            if below and cross:
+                holding = True
+                ind += ['buy']
+            else:
+                ind += ['na']
+        elif holding:
+            positive = row[col] > 0
+            peak = df[col][i-1] > row[col]
+            if positive and peak:
+                holding = False
+                ind += ['sell']
+            else:
+                ind += ['hold']
+    
+    column_name = f'{col} ind'
+    df[column_name] = ind
+    return df, column_name
+
 if __name__ == '__main__':
     algo = download('5d')
-    algo,long = moving_avg(algo,240)
-    algo,short = moving_avg(algo,20)
+    algo,short = moving_avg(algo,40)
+    algo,delta = delta_col(algo,short)
+    algo,smooth = smooth_col(algo,delta,12)
+    algo,ind = ind_avg(algo,smooth)
 
-    algo,diff = gap_col(algo,long,short)
-    algo,delta = delta_col(algo,diff)
+    buy = (algo.loc[algo[ind] == 'buy']).reset_index()
+    sell = (algo.loc[algo[ind] == 'sell']).reset_index()
 
-    algo = algo[-60*8:]
-    ot = algo.loc[algo[long] > 0]
-    t = algo.loc[algo[short] > 0]
+    perf = list()
+    holding = list()
+    for i in range(len(sell)):
+        perf += [100*(sell['Close'][i]-buy['Close'][i])/buy['Close'][i]]
+        holding += [(sell['Datetime'][i]-buy['Datetime'][i]).seconds/60]
 
-    plt.subplot(1,3,1)
-    plt.plot(algo.index,algo['Close'])
-    plt.plot(ot.index,ot[long],color='orange')
-    plt.plot(t.index,t[short],color='green')
+    perf = DataFrame({'perf':perf,'hold':holding})
+    print(f'performance: {perf["perf"].sum():4.4}%')
+    print(f'  trade avg: {perf["perf"].mean():4.4}%')
+    print(f'        std: {perf["perf"].std():4.4}%')
+    print(f'     trades: {perf["perf"].count()}')
+    print(f' trade time: {perf["hold"].mean():4.4}')
+    print(f'  trade dev: {perf["hold"].std():4.4}')
 
-    plt.subplot(1,3,2)
-    plt.plot(algo.index,algo[diff])
-
-    plt.subplot(1,3,3)
-    plt.plot(algo.index,algo[delta])
-    plt.show()
+    print(algo.iloc[-1][ind])
