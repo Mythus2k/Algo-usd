@@ -1,6 +1,6 @@
 import yfinance as yf
 from matplotlib import pyplot as plt
-from pandas import DataFrame,Timestamp
+from pandas import DataFrame,concat,Timedelta
 
 def download(period='5d'):
     algo = yf.download('algo-usd',period=period,interval='1m')
@@ -9,17 +9,6 @@ def download(period='5d'):
     algo = algo.reset_index()
 
     return algo
-    
-def percent_col(df,col):
-    percent = [0]
-    for i,row in df.iterrows():
-        if i > 0:
-            new = row[col]
-            old = df.iloc[i-1][col]
-            if old != 0: percent += [100*(new-old)/old]
-            else: percent += [0]
-    df[f'delta {col}'] = percent
-    return df, f'delta {col}'
 
 def point_col(df,timeframe=60):
     points = [0 for _ in range(timeframe)]
@@ -43,37 +32,12 @@ def moving_avg(df,history=120):
     return df, f'{history} avg'
 
 def adj_tz(df,tz='US/Eastern'):
+    Datetime = []
     for i,row in df.iterrows():
-        row['Datetime'] = row['Datetime'].tz_convert(tz)
+        Datetime += [row['Datetime'] - Timedelta('5 hours')]
+
+    df['Datetime'] = Datetime
     return df
-
-def plot():
-    algo = download('5d')
-    algo,long = moving_avg(algo,240)
-    algo,short = moving_avg(algo,20)
-
-    algo,delta = delta_col(algo,short)
-
-    algo = algo[-60*5:]
-    ot = algo.loc[algo[long] > 0]
-    t = algo.loc[algo[short] > 0]
-
-    plt.subplot(1,2,1)
-    plt.plot(algo.index,algo['Close'])
-    plt.plot(ot.index,ot[long],color='orange')
-    plt.plot(t.index,t[short],color='green')
-
-    plt.subplot(1,2,2)
-    x, y = [list() for _ in range(2)]
-    for i,row in algo.iterrows():
-        if i%1 == 0:
-            x += [row.name]
-            y += [row[delta]]
-    plt.plot(x,y)
-
-
-    print(algo)
-    plt.show()
 
 def gap_col(df,long,short):
     l = df[long]
@@ -91,50 +55,74 @@ def delta_col(df,col):
     df[f'delta {col}'] = delta
     return df,f'delta {col}'
 
-def smooth_col(df,col,smooth=2):
+def smooth_col(df,col,smooth=2,newCol=False):
     avg = [0 for _ in range(smooth)]
     for i,row in df[smooth:].iterrows():
         avg += [df[col][i-smooth:i].mean()]
 
-    newCol = f'{col} smooth'
-    df[newCol] = avg
-    return df,newCol
+    if newCol:
+        newCol = f'{col} smooth'
+        df[newCol] = avg
+        return df,newCol
+    else:
+        df[col] = avg
+        return df,col
 
-def ind_avg(df,col):
+def ind_avg(df,indCol):
     holding = False
     ind = ['na']
     for i,row in df[1:].iterrows():
         if not holding:
-            below = df[col][i-1] < 0
-            cross = row[col] > 0 
-            if below and cross:
+            one = row[indCol] > df[indCol][i-1]
+            two = row[indCol] < row['Close']
+            if one and two:
                 holding = True
+                enter = row['Close']
                 ind += ['buy']
             else:
                 ind += ['na']
         elif holding:
-            positive = row[col] > 0
-            peak = df[col][i-1] > row[col]
-            if positive and peak:
+            one = row[indCol] < df[indCol][i-1]
+            take = ((row['Close'] - enter)/enter) > .003
+            if one or take:
                 holding = False
                 ind += ['sell']
             else:
                 ind += ['hold']
     
-    column_name = f'{col} ind'
+    column_name = f'{indCol} ind'
     df[column_name] = ind
     return df, column_name
 
-if __name__ == '__main__':
+def meth_One():
     algo = download('5d')
-    algo,short = moving_avg(algo,40)
+    # moving avg: 60,20 smoothing: 10,10
+    algo,short = moving_avg(algo,60)
     algo,delta = delta_col(algo,short)
-    algo,smooth = smooth_col(algo,delta,12)
-    algo,ind = ind_avg(algo,smooth)
+    algo,smooth = smooth_col(algo,delta,8)
+    algo,ind = ind_avg(algo,short)
 
-    buy = (algo.loc[algo[ind] == 'buy']).reset_index()
-    sell = (algo.loc[algo[ind] == 'sell']).reset_index()
+    buy = (algo.loc[algo[ind] == 'buy'])
+    sell = (algo.loc[algo[ind] == 'sell'])
 
+    viewslot = 60*8
+    plotting = algo[-viewslot:]
+    b = plotting.loc[plotting[ind] == 'buy']
+    s = plotting.loc[plotting[ind] == 'sell']
+    plt.subplot(2,1,2)
+    plt.plot(plotting.index,plotting[smooth])
+    plt.plot(plotting.index,[0 for _ in range(len(plotting.index))],
+    color='gray')
+
+    plt.subplot(2,1,1)
+    plt.plot(plotting.index,plotting['Close'])
+    a = plotting.loc[plotting[short] > 0]
+    plt.plot(a.index,a[short],color='orange')
+    plt.scatter(b.index,b['Close'],marker='x',color='green')
+    plt.scatter(s.index,s['Close'],marker='x',color='red')
+
+    buy = buy.reset_index()
+    sell = sell.reset_index()
     perf = list()
     holding = list()
     for i in range(len(sell)):
@@ -150,3 +138,138 @@ if __name__ == '__main__':
     print(f'  trade dev: {perf["hold"].std():4.4}')
 
     print(algo.iloc[-1][ind])
+    plt.show()
+
+def buy_ind(df,mvg_avg,dmvg_avg,lmvg_avg):
+    algo = df
+    short = mvg_avg
+    _short = dmvg_avg
+    long = lmvg_avg
+    # buy indicator - crossing
+    holding = False
+    counter = 0
+    ind = ['na']
+    for i,row in algo[1:].iterrows():
+        if holding:
+            holding = False
+            counter = 10
+            ind += ['na']
+        elif counter == 0 and not holding:
+            prev = algo[_short][i-1] < 0
+            cross = row[_short] > 0
+            up = row[long] > row[short]
+            if prev and cross and up:
+                holding = True
+                ind += ['buy']
+            else:
+                ind += ['na']
+        else:
+            counter -= 1
+            ind += ['na']
+
+    algo['buy'] = ind
+    return algo,'buy'
+
+def sell_ind(df,mvg_avg,dmvg_avg,lmvg_avg):
+    algo = df
+    short = mvg_avg
+    _short = dmvg_avg
+    long = lmvg_avg
+    # buy indicator - crossing
+    holding = False
+    counter = 0
+    ind = ['na']
+    for i,row in algo[1:].iterrows():
+        if holding:
+            holding = False
+            counter = 10
+            ind += ['na']
+        elif counter == 0 and not holding:
+            prev = algo[_short][i-1] > 0
+            cross = row[_short] < 0
+            up = row[long] < row[short]
+            if prev and cross and up:
+                holding = True
+                ind += ['sell']
+            else:
+                ind += ['na']
+        else:
+            counter -= 1
+            ind += ['na']
+
+    algo['sell'] = ind
+    return algo,'sell'
+
+def find_profitability(df,printStats=False):
+    buys = df.loc[df['buy'] == 'buy']
+    sells = df.loc[df['sell'] == 'sell']
+    mixed = concat([buys,sells]).sort_index().reset_index()
+
+    holds = dict()
+    perform = []
+    times = []
+    for i,row in mixed.iterrows():
+        if row['buy'] == 'buy':
+            holds[row.name] = row
+        elif row['sell'] == 'sell':
+            close = row['Close']
+            etime = row['Datetime']
+            for b in holds.values():
+                enter = b['Close']
+                time = b['Datetime']
+                perform += [100*(close-enter)/enter]
+                times += [(etime-time).seconds/60]
+            holds = dict()
+    
+    
+    p = (DataFrame({0:perform,1:times}))
+    if printStats:
+        print(f'sum : {p[0].sum():.4}%')
+        print(f'mean: {p[0].mean():.4}%')
+        print(f'std : {p[0].std():.4}%')
+        print(f'min : {p[0].min():.4}%')
+        print(f'max : {p[0].max():.4}%')
+
+    return p
+
+def main(prints=False):
+    algo = download()
+    algo = adj_tz(algo)
+
+    algo,long = moving_avg(algo,240)
+
+    algo,short = moving_avg(algo,60)
+
+    algo,_short = delta_col(algo,short)
+    algo,_short = smooth_col(algo,_short,8)
+    
+    algo,buy = buy_ind(algo,short,_short,long)
+    algo,sell = sell_ind(algo,short,_short,long)
+
+    buys = algo.loc[algo['buy'] == 'buy']
+    sells = algo.loc[algo['sell'] == 'sell']
+
+    m = concat([buys,sells,algo[-1:]]).sort_index()
+    print(m[['Datetime','Close','buy','sell']][-5:])
+    m.to_csv('algo.csv')
+
+    if prints:
+        p = find_profitability(algo,True)
+
+        algo = algo[-60*12:]
+        x = algo.index
+
+        plt.subplot(2,1,1)
+        plt.plot(x,algo['Close'])
+        plt.plot(x,algo[short],color='green')
+        plt.plot(x,algo[long],color='orange')
+        plt.scatter(buys.index,buys['Close'],marker='x',color='green')
+        plt.scatter(sells.index,sells['Close'],marker='x',color='red')
+
+        plt.subplot(2,1,2)
+        plt.plot(x,algo[_short],color='green')
+        plt.plot(x,[0 for _ in range(len(x))],color='gray')
+        plt.show()
+
+if __name__ == '__main__':
+    main()
